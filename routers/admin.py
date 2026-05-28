@@ -1,0 +1,283 @@
+from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import extract
+from database import get_db
+from models import Agent, Order, OrderItem, get_discount, YOUR_COST_RATE, TIERS, calc_tier_by_retail, now_utc
+from datetime import datetime, timezone, date
+from typing import Optional
+import os
+
+from routers.public import _order_dict
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "pola-admin-2026")
+
+
+def _auth(authorization: Optional[str] = Header(None)):
+    if authorization != f"Bearer {ADMIN_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _agent_monthly_stats(agent_code: str, month: str, db: Session) -> dict:
+    year, mon = map(int, month.split("-"))
+    orders = (
+        db.query(Order)
+        .filter(
+            Order.agent_code == agent_code,
+            Order.status != "已取消",
+            extract("year", Order.created_at) == year,
+            extract("month", Order.created_at) == mon,
+        )
+        .all()
+    )
+    retail_sum = sum(o.retail_total for o in orders)
+    agent_cost_sum = sum(o.agent_cost_total for o in orders)
+    your_cost = round(retail_sum * YOUR_COST_RATE)
+    return {
+        "month": month,
+        "retail_sum": retail_sum,
+        "order_count": len(orders),
+        "agent_cost_sum": agent_cost_sum,
+        "your_profit_sum": agent_cost_sum - your_cost,
+        "calculated_tier_next_month": calc_tier_by_retail(retail_sum),
+    }
+
+
+def _agent_dict(a: Agent, month: str, db: Session) -> dict:
+    stats = _agent_monthly_stats(a.code, month, db)
+    return {
+        "code": a.code,
+        "name": a.name,
+        "phone": a.phone,
+        "current_tier": a.current_tier,
+        "manual_override": a.manual_override,
+        "joined_at": a.joined_at,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "monthly_stats": stats,
+    }
+
+
+@router.get("/orders")
+def list_orders(
+    month: Optional[str] = None,
+    status: Optional[str] = None,
+    agent_code: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    if not month:
+        month = date.today().strftime("%Y-%m")
+    year, mon = map(int, month.split("-"))
+
+    query = (
+        db.query(Order)
+        .options(joinedload(Order.items))
+        .filter(
+            extract("year", Order.created_at) == year,
+            extract("month", Order.created_at) == mon,
+        )
+        .order_by(Order.created_at.desc())
+    )
+    if status:
+        query = query.filter(Order.status == status)
+    if agent_code:
+        query = query.filter(Order.agent_code == agent_code)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            (Order.order_number.ilike(like))
+            | (Order.customer_name.ilike(like))
+            | (Order.customer_phone.ilike(like))
+        )
+
+    orders = query.all()
+    return {"month": month, "total": len(orders), "items": [_order_dict(o) for o in orders]}
+
+
+@router.patch("/orders/{order_number}/status")
+def update_order_status(
+    order_number: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    order = db.query(Order).filter(Order.order_number == order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    new_status = body.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status required")
+
+    now = now_utc()
+    order.status = new_status
+    if new_status == "已確認" and not order.confirmed_at:
+        order.confirmed_at = now
+    elif new_status == "已出貨" and not order.shipped_at:
+        order.shipped_at = now
+
+    db.commit()
+    db.refresh(order)
+    return _order_dict(order)
+
+
+@router.get("/agents")
+def list_agents(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    if not month:
+        month = date.today().strftime("%Y-%m")
+    agents = db.query(Agent).order_by(Agent.created_at).all()
+    return [_agent_dict(a, month, db) for a in agents]
+
+
+@router.post("/agents")
+def create_agent(
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    code = (body.get("code") or "").strip()
+    name = (body.get("name") or "").strip()
+    if not code or not name:
+        raise HTTPException(status_code=400, detail="code and name required")
+    if db.query(Agent).filter(Agent.code == code).first():
+        raise HTTPException(status_code=400, detail="Code already exists")
+
+    agent = Agent(
+        code=code,
+        name=name,
+        phone=body.get("phone"),
+        current_tier=body.get("current_tier", 1),
+        manual_override=body.get("manual_override", False),
+        joined_at=body.get("joined_at") or date.today().isoformat(),
+    )
+    db.add(agent)
+    db.commit()
+    db.refresh(agent)
+    return _agent_dict(agent, date.today().strftime("%Y-%m"), db)
+
+
+@router.patch("/agents/{code}")
+def update_agent(
+    code: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    agent = db.query(Agent).filter(Agent.code == code).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    for field in ["name", "phone", "current_tier", "manual_override", "joined_at"]:
+        if field in body:
+            setattr(agent, field, body[field])
+
+    db.commit()
+    return _agent_dict(agent, date.today().strftime("%Y-%m"), db)
+
+
+@router.delete("/agents/{code}")
+def delete_agent(
+    code: str,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    agent = db.query(Agent).filter(Agent.code == code).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    db.query(Order).filter(Order.agent_code == code).update({"agent_code": None})
+    db.delete(agent)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/dashboard/kpi")
+def get_kpi(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    if not month:
+        month = date.today().strftime("%Y-%m")
+    year, mon = map(int, month.split("-"))
+
+    all_orders = db.query(Order).filter(
+        extract("year", Order.created_at) == year,
+        extract("month", Order.created_at) == mon,
+    ).all()
+
+    valid = [o for o in all_orders if o.status != "已取消"]
+    retail_total = sum(o.retail_total for o in valid)
+    agent_cost_total = sum(o.agent_cost_total for o in valid)
+    your_cost_total = round(retail_total * YOUR_COST_RATE)
+
+    return {
+        "month": month,
+        "order_count": len(valid),
+        "cancelled_count": len(all_orders) - len(valid),
+        "retail_total": retail_total,
+        "agent_cost_total": agent_cost_total,
+        "your_cost_total": your_cost_total,
+        "your_profit": agent_cost_total - your_cost_total,
+        "pending_count": sum(1 for o in all_orders if o.status == "待確認"),
+    }
+
+
+@router.get("/reports/monthly")
+def get_monthly_report(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    if not month:
+        month = date.today().strftime("%Y-%m")
+    year, mon = map(int, month.split("-"))
+
+    all_orders = db.query(Order).filter(
+        extract("year", Order.created_at) == year,
+        extract("month", Order.created_at) == mon,
+    ).all()
+
+    valid = [o for o in all_orders if o.status != "已取消"]
+    retail_total = sum(o.retail_total for o in valid)
+    agent_cost_total = sum(o.agent_cost_total for o in valid)
+    your_cost_total = round(retail_total * YOUR_COST_RATE)
+
+    agents = db.query(Agent).all()
+    agent_ranking = []
+    for a in agents:
+        stats = _agent_monthly_stats(a.code, month, db)
+        if stats["retail_sum"] > 0:
+            agent_ranking.append({
+                "code": a.code,
+                "name": a.name,
+                "retail_sum": stats["retail_sum"],
+            })
+    agent_ranking.sort(key=lambda x: -x["retail_sum"])
+
+    return {
+        "month": month,
+        "summary": {
+            "order_count": len(valid),
+            "cancelled_count": len(all_orders) - len(valid),
+            "retail_total": retail_total,
+            "agent_cost_total": agent_cost_total,
+            "your_cost_total": your_cost_total,
+            "your_profit": agent_cost_total - your_cost_total,
+        },
+        "agent_ranking": agent_ranking,
+    }
