@@ -4,11 +4,16 @@ from datetime import datetime, timezone
 from database import Base
 
 TIERS = [
-    {"tier": 1, "min_retail": 0, "max_retail": 70000, "discount": 0.80},
-    {"tier": 2, "min_retail": 70000, "max_retail": 140000, "discount": 0.75},
-    {"tier": 3, "min_retail": 140000, "max_retail": None, "discount": 0.70},
+    {"tier": 1, "min_retail": 0,      "max_retail": 70000,  "discount": 0.80},
+    {"tier": 2, "min_retail": 70000,  "max_retail": 140000, "discount": 0.75},
+    {"tier": 3, "min_retail": 140000, "max_retail": None,   "discount": 0.70},
+]
+STORE_TIERS = [
+    {"tier": 1, "min_retail": 0,      "max_retail": 300000, "discount": 0.80},
+    {"tier": 2, "min_retail": 300000, "max_retail": None,   "discount": 0.70},
 ]
 YOUR_COST_RATE = 0.60
+DIRECT_DISCOUNT = 0.90  # 沒有業務代碼的直客
 
 
 def get_discount(tier: int) -> float:
@@ -18,8 +23,28 @@ def get_discount(tier: int) -> float:
     return 0.80
 
 
+def get_store_discount(tier: int) -> float:
+    for t in STORE_TIERS:
+        if t["tier"] == tier:
+            return t["discount"]
+    return 0.80
+
+
+def get_agent_discount(agent) -> float:
+    if getattr(agent, "agent_type", "personal") == "store":
+        return get_store_discount(agent.current_tier)
+    return get_discount(agent.current_tier)
+
+
 def calc_tier_by_retail(retail: int) -> int:
     for t in reversed(TIERS):
+        if retail >= t["min_retail"]:
+            return t["tier"]
+    return 1
+
+
+def calc_store_tier_by_retail(retail: int) -> int:
+    for t in reversed(STORE_TIERS):
         if retail >= t["min_retail"]:
             return t["tier"]
     return 1
@@ -35,7 +60,8 @@ class Agent(Base):
     id = Column(Integer, primary_key=True)
     code = Column(String, unique=True, nullable=False, index=True)
     name = Column(String, nullable=False)
-    phone = Column(String)
+    phone = Column(String, index=True)
+    agent_type = Column(String, default="personal", nullable=False)  # personal / store
     current_tier = Column(Integer, nullable=False, default=1)
     manual_override = Column(Boolean, default=False)
     joined_at = Column(String, nullable=False)

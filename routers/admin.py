@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import extract
 from database import get_db
-from models import Agent, Order, OrderItem, Customer, get_discount, YOUR_COST_RATE, TIERS, calc_tier_by_retail, now_utc
+from models import (Agent, Order, OrderItem, Customer,
+                    get_discount, get_store_discount, get_agent_discount,
+                    YOUR_COST_RATE, TIERS, STORE_TIERS,
+                    calc_tier_by_retail, calc_store_tier_by_retail, now_utc)
 from datetime import datetime, timezone, date
 from typing import Optional
 import os
@@ -50,7 +53,9 @@ def _agent_dict(a: Agent, month: str, db: Session) -> dict:
         "code": a.code,
         "name": a.name,
         "phone": a.phone,
+        "agent_type": getattr(a, "agent_type", "personal"),
         "current_tier": a.current_tier,
+        "discount_rate": get_agent_discount(a),
         "manual_override": a.manual_override,
         "joined_at": a.joined_at,
         "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -125,6 +130,26 @@ def update_order_status(
     return _order_dict(order)
 
 
+@router.patch("/orders/{order_number}/customer")
+def update_order_customer(
+    order_number: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    order = db.query(Order).filter(Order.order_number == order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    for field in ["customer_name", "customer_phone", "customer_address", "notes", "payment_method"]:
+        if field in body:
+            setattr(order, field, body[field] or None)
+    db.commit()
+    db.refresh(order)
+    return _order_dict(order)
+
+
+
 @router.get("/agents")
 def list_agents(
     month: Optional[str] = None,
@@ -156,6 +181,7 @@ def create_agent(
         code=code,
         name=name,
         phone=body.get("phone"),
+        agent_type=body.get("agent_type", "personal"),
         current_tier=body.get("current_tier", 1),
         manual_override=body.get("manual_override", False),
         joined_at=body.get("joined_at") or date.today().isoformat(),
@@ -178,7 +204,7 @@ def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    for field in ["name", "phone", "current_tier", "manual_override", "joined_at"]:
+    for field in ["name", "phone", "agent_type", "current_tier", "manual_override", "joined_at"]:
         if field in body:
             setattr(agent, field, body[field])
 
