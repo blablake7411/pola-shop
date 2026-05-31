@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import extract
 from database import get_db
-from models import Agent, Order, OrderItem, get_discount, YOUR_COST_RATE, TIERS, calc_tier_by_retail, now_utc
+from models import Agent, Order, OrderItem, Customer, get_discount, YOUR_COST_RATE, TIERS, calc_tier_by_retail, now_utc
 from datetime import datetime, timezone, date
 from typing import Optional
 import os
@@ -281,3 +281,84 @@ def get_monthly_report(
         },
         "agent_ranking": agent_ranking,
     }
+
+
+# ── Customers ─────────────────────────────────────────────────
+
+@router.get("/customers")
+def list_customers(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    customers = db.query(Customer).order_by(Customer.created_at).all()
+    return [
+        {
+            "id": c.id,
+            "phone": c.phone,
+            "name": c.name,
+            "agent_code": c.agent_code,
+            "agent_name": c.agent.name if c.agent else None,
+            "notes": c.notes,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in customers
+    ]
+
+
+@router.post("/customers")
+def create_customer(
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    phone = (body.get("phone") or "").strip()
+    name = (body.get("name") or "").strip()
+    if not phone or not name:
+        raise HTTPException(status_code=400, detail="phone and name required")
+    if db.query(Customer).filter(Customer.phone == phone).first():
+        raise HTTPException(status_code=400, detail="Phone already exists")
+    c = Customer(
+        phone=phone,
+        name=name,
+        agent_code=body.get("agent_code") or None,
+        notes=body.get("notes") or None,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {"id": c.id, "phone": c.phone, "name": c.name, "agent_code": c.agent_code}
+
+
+@router.patch("/customers/{phone}")
+def update_customer(
+    phone: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    c = db.query(Customer).filter(Customer.phone == phone).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    for field in ["name", "agent_code", "notes"]:
+        if field in body:
+            setattr(c, field, body[field] or None)
+    db.commit()
+    return {"phone": c.phone, "name": c.name, "agent_code": c.agent_code}
+
+
+@router.delete("/customers/{phone}")
+def delete_customer(
+    phone: str,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    c = db.query(Customer).filter(Customer.phone == phone).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    db.delete(c)
+    db.commit()
+    return {"ok": True}

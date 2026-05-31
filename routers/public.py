@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract
 from database import get_db
-from models import Agent, Order, OrderItem, get_discount, YOUR_COST_RATE
+from models import Agent, Order, OrderItem, Customer, get_discount, YOUR_COST_RATE
 from datetime import datetime, timezone, date
 from typing import Optional, List
 from pydantic import BaseModel
@@ -24,7 +24,7 @@ class OrderIn(BaseModel):
     customer_name: str
     customer_phone: Optional[str] = None
     customer_address: Optional[str] = None
-    payment_method: str
+    payment_method: Optional[str] = None
     notes: Optional[str] = None
     items: List[OrderItemIn]
 
@@ -36,6 +36,17 @@ def _gen_order_number(db: Session) -> str:
         Order.order_number.like(f"{prefix}-%")
     ).scalar()
     return f"{prefix}-{count + 1:03d}"
+
+
+@router.get("/customers/lookup")
+def lookup_customer(phone: str, db: Session = Depends(get_db)):
+    customer = db.query(Customer).filter(Customer.phone == phone).first()
+    if not customer or not customer.agent_code:
+        return {"found": False}
+    agent = db.query(Agent).filter(Agent.code == customer.agent_code).first()
+    if not agent:
+        return {"found": False}
+    return {"found": True, "agent_code": agent.code, "agent_name": agent.name}
 
 
 @router.get("/agents/{code}")
@@ -89,9 +100,14 @@ def create_order(data: OrderIn, db: Session = Depends(get_db)):
 
     if data.agent_code:
         agent = db.query(Agent).filter(Agent.code == data.agent_code).first()
-        if agent:
-            agent_tier = agent.current_tier
-            agent_discount = get_discount(agent_tier)
+    elif data.customer_phone:
+        customer = db.query(Customer).filter(Customer.phone == data.customer_phone).first()
+        if customer and customer.agent_code:
+            agent = db.query(Agent).filter(Agent.code == customer.agent_code).first()
+
+    if agent:
+        agent_tier = agent.current_tier
+        agent_discount = get_discount(agent_tier)
 
     retail_total = sum(i.unit_price * i.quantity for i in data.items)
     agent_cost_total = round(retail_total * agent_discount) if agent_discount else retail_total

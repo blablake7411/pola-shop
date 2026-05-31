@@ -81,3 +81,16 @@ class OrderItem(Base):
     quantity = Column(Integer, nullable=False, default=1)
 
     order = relationship("Order", back_populates="items")
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True)
+    phone = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    agent_code = Column(String, ForeignKey("agents.code"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now_utc)
+
+    agent = relationship("Agent")
