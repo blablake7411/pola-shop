@@ -53,7 +53,7 @@ class Order(Base):
     customer_name = Column(String, nullable=False)
     customer_phone = Column(String)
     customer_address = Column(Text)
-    payment_method = Column(String, nullable=False)
+    payment_method = Column(String, nullable=True)
     notes = Column(Text)
     status = Column(String, default="待確認")
     agent_tier = Column(Integer)
