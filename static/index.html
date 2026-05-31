@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POLA 訂單管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, 'Noto Sans TC', sans-serif; }
+    .status-badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:600; }
+    .s-待確認  { background:#fef9c3; color:#854d0e; }
+    .s-已確認  { background:#dbeafe; color:#1e40af; }
+    .s-備貨中  { background:#ede9fe; color:#5b21b6; }
+    .s-已出貨  { background:#dcfce7; color:#166534; }
+    .s-已完成  { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+    .s-已取消  { background:#f1f5f9; color:#94a3b8; }
+    .p-未付款  { background:#fee2e2; color:#991b1b; }
+    .p-已付款  { background:#dcfce7; color:#166534; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div>
+        <span class="text-base font-bold tracking-widest text-black">POLA</span>
+        <span class="text-xs text-gray-400 ml-2">管理後台</span>
+      </div>
+      <nav class="flex gap-4 text-sm">
+        <span class="font-semibold text-black border-b-2 border-black pb-0.5">訂單</span>
+        <a href="/agents" class="text-gray-400 hover:text-black transition">業務</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-5">
+
+    <!-- Summary Bar -->
+    <div id="summary-bar" class="grid grid-cols-3 gap-3 mb-5"></div>
+
+    <!-- Status Filter -->
+    <div class="flex gap-2 flex-wrap mb-4" id="status-filters">
+      <button onclick="filterStatus('')" data-s="" class="filter-btn active text-xs px-3 py-1.5 rounded-full border font-medium transition">全部</button>
+      <button onclick="filterStatus('待確認')" data-s="待確認" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">待確認</button>
+      <button onclick="filterStatus('已確認')" data-s="已確認" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">已確認</button>
+      <button onclick="filterStatus('備貨中')" data-s="備貨中" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">備貨中</button>
+      <button onclick="filterStatus('已出貨')" data-s="已出貨" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">已出貨</button>
+      <button onclick="filterStatus('已完成')" data-s="已完成" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">已完成</button>
+      <button onclick="filterStatus('已取消')" data-s="已取消" class="filter-btn text-xs px-3 py-1.5 rounded-full border font-medium transition">已取消</button>
+    </div>
+
+    <!-- Orders List -->
+    <div id="orders-list" class="space-y-2"></div>
+    <div id="empty-msg" class="text-center text-gray-300 py-16 hidden text-sm">目前沒有訂單</div>
+  </main>
+
+  <!-- Order Detail Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/50 z-50 hidden overflow-y-auto" onclick="closeModal(event)">
+    <div class="min-h-screen flex items-end sm:items-center justify-center p-4">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <div id="modal-order-num" class="text-xs text-gray-400 font-mono mb-0.5"></div>
+            <div id="modal-date" class="text-xs text-gray-400"></div>
+          </div>
+          <button onclick="closeModal()" class="text-gray-300 text-2xl leading-none hover:text-gray-600">&times;</button>
+        </div>
+
+        <!-- Customer -->
+        <div class="bg-gray-50 rounded-xl p-3 mb-3 space-y-1 text-sm">
+          <div class="flex gap-2">
+            <span class="text-gray-400 w-14 shrink-0">客人</span>
+            <span id="modal-customer" class="font-medium text-gray-900"></span>
+          </div>
+          <div class="flex gap-2">
+            <span class="text-gray-400 w-14 shrink-0">電話</span>
+            <span id="modal-phone" class="text-gray-700"></span>
+          </div>
+          <div class="flex gap-2">
+            <span class="text-gray-400 w-14 shrink-0">地址</span>
+            <span id="modal-address" class="text-gray-700 break-words"></span>
+          </div>
+          <div class="flex gap-2">
+            <span class="text-gray-400 w-14 shrink-0">業務</span>
+            <span id="modal-agent" class="text-gray-700"></span>
+          </div>
+        </div>
+
+        <!-- Items -->
+        <div id="modal-items" class="space-y-1.5 mb-3"></div>
+
+        <!-- Pricing -->
+        <div class="bg-gray-50 rounded-xl p-3 mb-3 space-y-1.5 text-sm">
+          <div class="flex justify-between text-gray-500">
+            <span>原價小計</span><span id="modal-subtotal"></span>
+          </div>
+          <div class="flex justify-between text-gray-500">
+            <span>折扣</span><span id="modal-discount" class="text-red-500"></span>
+          </div>
+          <div class="flex justify-between text-gray-500">
+            <span>運費</span><span id="modal-shipping"></span>
+          </div>
+          <div class="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-1.5">
+            <span>總計</span><span id="modal-total"></span>
+          </div>
+        </div>
+
+        <!-- Status & Payment -->
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">訂單狀態</label>
+            <select id="modal-status" onchange="patchOrder('status', this.value)"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <option>待確認</option>
+              <option>已確認</option>
+              <option>備貨中</option>
+              <option>已出貨</option>
+              <option>已完成</option>
+              <option>已取消</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">付款狀態</label>
+            <select id="modal-payment-status" onchange="patchOrder('payment_status', this.value)"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <option>未付款</option>
+              <option>已付款</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="mb-4">
+          <label class="text-xs text-gray-400 block mb-1">備註</label>
+          <div id="modal-notes" class="text-sm text-gray-600 bg-gray-50 rounded-xl p-3 min-h-[40px]"></div>
+        </div>
+
+        <!-- Delete -->
+        <button onclick="deleteOrder()"
+          class="w-full text-center text-xs text-red-400 hover:text-red-600 transition py-1">
+          刪除此訂單
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';  // same origin
+    let allOrders = [];
+    let currentOrderId = null;
+    let currentFilter = '';
+
+    async function load() {
+      const url = currentFilter ? `${API}/api/orders?status=${encodeURIComponent(currentFilter)}` : `${API}/api/orders`;
+      const res = await fetch(url);
+      allOrders = await res.json();
+      renderOrders(allOrders);
+      renderSummary(allOrders);
+    }
+
+    function renderSummary(orders) {
+      const total = orders.reduce((s, o) => s + o.final_amount, 0);
+      const paid = orders.filter(o => o.payment_status === '已付款').reduce((s, o) => s + o.final_amount, 0);
+      const pending = orders.filter(o => o.status === '待確認').length;
+      document.getElementById('summary-bar').innerHTML = `
+        <div class="bg-white rounded-xl p-3 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-gray-900">$${total.toLocaleString()}</div>
+          <div class="text-xs text-gray-400 mt-0.5">總金額</div>
+        </div>
+        <div class="bg-white rounded-xl p-3 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-green-600">$${paid.toLocaleString()}</div>
+          <div class="text-xs text-gray-400 mt-0.5">已收款</div>
+        </div>
+        <div class="bg-white rounded-xl p-3 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-amber-600">${pending}</div>
+          <div class="text-xs text-gray-400 mt-0.5">待確認</div>
+        </div>`;
+    }
+
+    function renderOrders(orders) {
+      const list = document.getElementById('orders-list');
+      const empty = document.getElementById('empty-msg');
+      if (!orders.length) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      list.innerHTML = orders.map(o => {
+        const itemsSummary = o.items.slice(0, 2).map(i => `${i.product_name} x${i.quantity}`).join('、');
+        const more = o.items.length > 2 ? ` 等 ${o.items.length} 項` : '';
+        const date = new Date(o.created_at).toLocaleDateString('zh-TW', {month:'numeric',day:'numeric'});
+        return `
+        <div onclick="openModal(${o.id})" class="bg-white border border-gray-100 rounded-xl p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition">
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <div>
+              <span class="text-xs text-gray-400 font-mono">${o.order_number}</span>
+              <span class="text-xs text-gray-300 mx-1">·</span>
+              <span class="text-xs text-gray-400">${date}</span>
+            </div>
+            <div class="flex gap-1.5 flex-shrink-0">
+              <span class="status-badge s-${o.status}">${o.status}</span>
+              <span class="status-badge p-${o.payment_status}">${o.payment_status}</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="font-semibold text-sm text-gray-900">${o.customer_name}</div>
+              <div class="text-xs text-gray-400 mt-0.5">${itemsSummary}${more}</div>
+              ${o.agent ? `<div class="text-xs text-gray-400 mt-0.5">業務：${o.agent.name}</div>` : ''}
+            </div>
+            <div class="text-right">
+              <div class="font-bold text-gray-900">$${o.final_amount.toLocaleString()}</div>
+              ${o.discount_amount > 0 ? `<div class="text-xs text-red-400">折扣 -$${o.discount_amount.toLocaleString()}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function filterStatus(s) {
+      currentFilter = s;
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.s === s);
+        btn.classList.toggle('bg-black', btn.dataset.s === s);
+        btn.classList.toggle('text-white', btn.dataset.s === s);
+        btn.classList.toggle('border-black', btn.dataset.s === s);
+        btn.classList.toggle('text-gray-600', btn.dataset.s !== s);
+        btn.classList.toggle('border-gray-200', btn.dataset.s !== s);
+      });
+      load();
+    }
+
+    function openModal(id) {
+      currentOrderId = id;
+      const o = allOrders.find(x => x.id === id);
+      if (!o) return;
+
+      document.getElementById('modal-order-num').textContent = o.order_number;
+      document.getElementById('modal-date').textContent = new Date(o.created_at).toLocaleString('zh-TW');
+      document.getElementById('modal-customer').textContent = o.customer_name;
+      document.getElementById('modal-phone').textContent = o.customer_phone || '—';
+      document.getElementById('modal-address').textContent = o.customer_address || '—';
+      document.getElementById('modal-agent').textContent = o.agent ? `${o.agent.name}（${Math.round(o.agent.discount_rate * 10)}折）` : '直接下單';
+      document.getElementById('modal-subtotal').textContent = `$${o.subtotal.toLocaleString()}`;
+      document.getElementById('modal-discount').textContent = o.discount_amount > 0 ? `-$${o.discount_amount.toLocaleString()}` : '—';
+      document.getElementById('modal-shipping').textContent = o.shipping_fee > 0 ? `$${o.shipping_fee.toLocaleString()}` : '免運';
+      document.getElementById('modal-total').textContent = `$${o.final_amount.toLocaleString()}`;
+      document.getElementById('modal-status').value = o.status;
+      document.getElementById('modal-payment-status').value = o.payment_status;
+      document.getElementById('modal-notes').textContent = o.notes || '無';
+      document.getElementById('modal-items').innerHTML = o.items.map(i => `
+        <div class="flex justify-between items-start text-sm py-1.5 border-b border-gray-50">
+          <div>
+            <span class="font-medium text-gray-800">${i.product_name}</span>
+            ${i.variant_label ? `<span class="text-xs text-gray-400 ml-1">${i.variant_label}</span>` : ''}
+            ${i.product_code ? `<span class="text-xs text-blue-400 ml-1">${i.product_code}</span>` : ''}
+            <div class="text-xs text-gray-400">x${i.quantity} × $${i.unit_price.toLocaleString()}</div>
+          </div>
+          <span class="font-medium text-gray-800 shrink-0 ml-2">$${i.item_subtotal.toLocaleString()}</span>
+        </div>`).join('');
+
+      document.getElementById('modal').classList.remove('hidden');
+    }
+
+    function closeModal(e) {
+      if (!e || e.target === document.getElementById('modal')) {
+        document.getElementById('modal').classList.add('hidden');
+        currentOrderId = null;
+      }
+    }
+
+    async function patchOrder(field, value) {
+      if (!currentOrderId) return;
+      await fetch(`${API}/api/orders/${currentOrderId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({[field]: value}),
+      });
+      load();
+    }
+
+    async function deleteOrder() {
+      if (!currentOrderId) return;
+      if (!confirm('確定要刪除這筆訂單？')) return;
+      await fetch(`${API}/api/orders/${currentOrderId}`, {method: 'DELETE'});
+      closeModal();
+      load();
+    }
+
+    // Init filter button styles
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      if (btn.dataset.s === '') {
+        btn.classList.add('bg-black', 'text-white', 'border-black');
+      } else {
+        btn.classList.add('text-gray-600', 'border-gray-200');
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

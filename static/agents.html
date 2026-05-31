@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POLA 業務管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, 'Noto Sans TC', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div>
+        <span class="text-base font-bold tracking-widest text-black">POLA</span>
+        <span class="text-xs text-gray-400 ml-2">管理後台</span>
+      </div>
+      <nav class="flex gap-4 text-sm">
+        <a href="/" class="text-gray-400 hover:text-black transition">訂單</a>
+        <span class="font-semibold text-black border-b-2 border-black pb-0.5">業務</span>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-700">業務清單</h2>
+      <button onclick="openAddModal()"
+        class="text-sm bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition">
+        + 新增業務
+      </button>
+    </div>
+
+    <div id="agents-list" class="space-y-2"></div>
+    <div id="empty-msg" class="text-center text-gray-300 py-16 hidden text-sm">還沒有業務資料</div>
+  </main>
+
+  <!-- Agent Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/50 z-50 hidden overflow-y-auto" onclick="closeModal(event)">
+    <div class="min-h-screen flex items-end sm:items-center justify-center p-4">
+      <div class="bg-white w-full max-w-md rounded-2xl p-5" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-center mb-4">
+          <h3 id="modal-title" class="font-bold text-gray-900">新增業務</h3>
+          <button onclick="closeModal()" class="text-gray-300 text-2xl leading-none hover:text-gray-600">&times;</button>
+        </div>
+
+        <div class="space-y-3 mb-5">
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">姓名</label>
+            <input id="f-name" type="text" placeholder="例：Amy"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-black transition">
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">連結代碼 <span class="text-gray-300">（英文/數字，唯一）</span></label>
+            <input id="f-code" type="text" placeholder="例：amy"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-black transition font-mono">
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">折扣率</label>
+            <div class="flex gap-2">
+              <select id="f-discount" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-black transition">
+                <option value="1.0">無折扣（原價）</option>
+                <option value="0.9">9折</option>
+                <option value="0.85">85折</option>
+                <option value="0.8" selected>8折</option>
+                <option value="0.75">75折</option>
+                <option value="0.7">7折</option>
+                <option value="0.65">65折</option>
+                <option value="0.6">6折</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">電話 <span class="text-gray-300">（選填）</span></label>
+            <input id="f-phone" type="text"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-black transition">
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 block mb-1">備註 <span class="text-gray-300">（選填）</span></label>
+            <textarea id="f-notes" rows="2"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-black transition resize-none"></textarea>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <button onclick="saveAgent()"
+            class="flex-1 bg-black text-white text-sm py-2.5 rounded-lg hover:bg-gray-800 transition font-medium">
+            儲存
+          </button>
+          <button id="delete-btn" onclick="deleteAgent()" class="hidden text-sm text-red-400 hover:text-red-600 transition px-3">
+            刪除
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    let agents = [];
+    let editingId = null;
+
+    async function load() {
+      const res = await fetch(`${API}/api/agents`);
+      agents = await res.json();
+      renderAgents();
+    }
+
+    function renderAgents() {
+      const list = document.getElementById('agents-list');
+      const empty = document.getElementById('empty-msg');
+      if (!agents.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+      empty.classList.add('hidden');
+
+      const catalogBase = window.location.origin.replace(/:\d+$/, ''); // fallback
+      list.innerHTML = agents.map(a => {
+        const discountLabel = a.discount_rate === 1 ? '原價' : `${Math.round(a.discount_rate * 10)}折`;
+        return `
+        <div class="bg-white border border-gray-100 rounded-xl p-4 hover:border-gray-300 transition">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="font-semibold text-gray-900">${a.name}</span>
+                <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">${discountLabel}</span>
+                ${!a.is_active ? '<span class="text-xs bg-red-50 text-red-400 px-2 py-0.5 rounded-full">停用</span>' : ''}
+              </div>
+              ${a.phone ? `<div class="text-xs text-gray-400 mb-1">${a.phone}</div>` : ''}
+              <div class="text-xs text-gray-400 font-mono truncate">?agent=${a.code}</div>
+            </div>
+            <button onclick="openEditModal(${a.id})" class="text-xs text-gray-400 hover:text-black transition shrink-0 px-2 py-1 border border-gray-200 rounded-lg">
+              編輯
+            </button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function openAddModal() {
+      editingId = null;
+      document.getElementById('modal-title').textContent = '新增業務';
+      document.getElementById('f-name').value = '';
+      document.getElementById('f-code').value = '';
+      document.getElementById('f-discount').value = '0.8';
+      document.getElementById('f-phone').value = '';
+      document.getElementById('f-notes').value = '';
+      document.getElementById('delete-btn').classList.add('hidden');
+      document.getElementById('modal').classList.remove('hidden');
+    }
+
+    function openEditModal(id) {
+      editingId = id;
+      const a = agents.find(x => x.id === id);
+      if (!a) return;
+      document.getElementById('modal-title').textContent = '編輯業務';
+      document.getElementById('f-name').value = a.name;
+      document.getElementById('f-code').value = a.code;
+      document.getElementById('f-discount').value = String(a.discount_rate);
+      document.getElementById('f-phone').value = a.phone || '';
+      document.getElementById('f-notes').value = a.notes || '';
+      document.getElementById('delete-btn').classList.remove('hidden');
+      document.getElementById('modal').classList.remove('hidden');
+    }
+
+    function closeModal(e) {
+      if (!e || e.target === document.getElementById('modal')) {
+        document.getElementById('modal').classList.add('hidden');
+        editingId = null;
+      }
+    }
+
+    async function saveAgent() {
+      const data = {
+        name: document.getElementById('f-name').value.trim(),
+        code: document.getElementById('f-code').value.trim().toLowerCase(),
+        discount_rate: parseFloat(document.getElementById('f-discount').value),
+        phone: document.getElementById('f-phone').value.trim() || null,
+        notes: document.getElementById('f-notes').value.trim() || null,
+      };
+      if (!data.name || !data.code) { alert('姓名和代碼為必填'); return; }
+
+      if (editingId) {
+        await fetch(`${API}/api/agents/${editingId}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data),
+        });
+      } else {
+        const res = await fetch(`${API}/api/agents`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.detail || '儲存失敗'); return; }
+      }
+
+      closeModal();
+      load();
+    }
+
+    async function deleteAgent() {
+      if (!editingId) return;
+      if (!confirm('刪除後無法復原，確定嗎？')) return;
+      await fetch(`${API}/api/agents/${editingId}`, {method: 'DELETE'});
+      closeModal();
+      load();
+    }
+
+    load();
+  </script>
+</body>
+</html>
