@@ -572,3 +572,38 @@ async def post_setting(
         db.add(Setting(key=key, value=value))
     db.commit()
     return {"ok": True}
+
+
+# ── Backfill customers from orders ────────────────────────────
+
+@router.post("/sync-customers")
+def sync_customers_from_orders(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    orders = db.query(Order).filter(Order.customer_phone != None).all()
+    created, updated = 0, 0
+    for o in orders:
+        if not o.customer_phone:
+            continue
+        existing = db.query(Customer).filter(Customer.phone == o.customer_phone).first()
+        if existing:
+            changed = False
+            if o.customer_name and not existing.name:
+                existing.name = o.customer_name
+                changed = True
+            if o.agent_code and not existing.agent_code:
+                existing.agent_code = o.agent_code
+                changed = True
+            if changed:
+                updated += 1
+        else:
+            db.add(Customer(
+                phone=o.customer_phone,
+                name=o.customer_name or o.customer_phone,
+                agent_code=o.agent_code,
+            ))
+            created += 1
+    db.commit()
+    return {"created": created, "updated": updated}

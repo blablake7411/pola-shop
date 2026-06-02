@@ -291,6 +291,21 @@ def create_order(data: OrderIn, db: Session = Depends(get_db)):
             quantity=item.quantity,
         ))
 
+    # Auto-upsert customer record
+    if data.customer_phone:
+        existing = db.query(Customer).filter(Customer.phone == data.customer_phone).first()
+        if existing:
+            if data.customer_name and not existing.name:
+                existing.name = data.customer_name
+            if agent and not existing.agent_code:
+                existing.agent_code = agent.code
+        else:
+            db.add(Customer(
+                phone=data.customer_phone,
+                name=data.customer_name or data.customer_phone,
+                agent_code=agent.code if agent else None,
+            ))
+
     db.commit()
     db.refresh(order)
 
