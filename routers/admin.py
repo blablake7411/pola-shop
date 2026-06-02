@@ -186,6 +186,16 @@ def update_order_full(
         if field in body:
             setattr(order, field, body[field] or None)
 
+    if "order_date" in body and body["order_date"]:
+        from datetime import datetime as dt
+        try:
+            new_date = dt.strptime(body["order_date"], "%Y-%m-%d").replace(
+                hour=12, minute=0, second=0, tzinfo=timezone.utc
+            )
+            order.created_at = new_date
+        except ValueError:
+            pass
+
     if "agent_code" in body:
         agent_code = body["agent_code"] or None
         order.agent_code = agent_code
