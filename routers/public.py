@@ -211,6 +211,34 @@ def get_agent_stats(code: str, db: Session = Depends(get_db)):
     }
 
 
+# ── Agent order edit (待確認 only) ────────────────────────────
+
+@router.patch("/agents/{code}/orders/{order_number}")
+def agent_edit_order(
+    code: str,
+    order_number: str,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    agent = db.query(Agent).filter(Agent.code == code).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    order = db.query(Order).filter(
+        Order.order_number == order_number,
+        Order.agent_code == code,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status != "待確認":
+        raise HTTPException(status_code=403, detail="Order already confirmed, cannot edit")
+    for field in ["customer_name", "customer_phone", "customer_address", "notes"]:
+        if field in body:
+            setattr(order, field, body[field] or None)
+    db.commit()
+    db.refresh(order)
+    return _order_dict(order)
+
+
 # ── Orders ────────────────────────────────────────────────────
 
 @router.post("/orders")

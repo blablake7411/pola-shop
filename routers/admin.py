@@ -81,6 +81,8 @@ def _agent_dict(a: Agent, month: str, db: Session) -> dict:
 @router.get("/orders")
 def list_orders(
     month: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     status: Optional[str] = None,
     agent_code: Optional[str] = None,
     q: Optional[str] = None,
@@ -88,19 +90,23 @@ def list_orders(
     authorization: Optional[str] = Header(None),
 ):
     _auth(authorization)
-    if not month:
-        month = date.today().strftime("%Y-%m")
-    year, mon = map(int, month.split("-"))
+    query = db.query(Order).options(joinedload(Order.items)).order_by(Order.created_at.desc())
 
-    query = (
-        db.query(Order)
-        .options(joinedload(Order.items))
-        .filter(
+    if start_date and end_date:
+        from datetime import datetime as dt
+        start = dt.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end = dt.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        query = query.filter(Order.created_at >= start, Order.created_at <= end)
+        month = start_date[:7]
+    else:
+        if not month:
+            month = date.today().strftime("%Y-%m")
+        year, mon = map(int, month.split("-"))
+        query = query.filter(
             extract("year", Order.created_at) == year,
             extract("month", Order.created_at) == mon,
         )
-        .order_by(Order.created_at.desc())
-    )
+
     if status:
         query = query.filter(Order.status == status)
     if agent_code:
