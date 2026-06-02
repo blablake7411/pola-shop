@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract
 from database import get_db
-from models import (Agent, Order, OrderItem, Customer,
+from models import (Agent, Order, OrderItem, Customer, GiftRequest,
                     get_agent_discount, DIRECT_DISCOUNT, YOUR_COST_RATE,
                     calc_tier_by_retail, calc_store_tier_by_retail)
 from datetime import datetime, timezone, date
 from typing import Optional, List
 from pydantic import BaseModel
+import json
 
 router = APIRouter(prefix="/api", tags=["public"])
 
@@ -182,8 +183,20 @@ def get_agent_stats(code: str, db: Session = Depends(get_db)):
     total_retail = sum(o.retail_total for o in all_orders)
     monthly_retail = sum(o.retail_total for o in monthly)
 
-    # Unique customers this agent has
     customer_phones = list({o.customer_phone for o in all_orders if o.customer_phone})
+
+    # 本月贈品兌換
+    monthly_gift_requests = (
+        db.query(GiftRequest)
+        .filter(
+            GiftRequest.agent_code == code,
+            GiftRequest.status != "已取消",
+            extract("year", GiftRequest.created_at) == today.year,
+            extract("month", GiftRequest.created_at) == today.month,
+        )
+        .all()
+    )
+    monthly_gift_total = sum(r.gift_total for r in monthly_gift_requests)
 
     return {
         "agent": _agent_public_dict(agent),
@@ -192,6 +205,8 @@ def get_agent_stats(code: str, db: Session = Depends(get_db)):
         "total_order_count": len(all_orders),
         "monthly_order_count": len(monthly),
         "customer_count": len(customer_phones),
+        "monthly_gift_total": monthly_gift_total,
+        "monthly_gift_request_count": len(monthly_gift_requests),
         "recent_orders": [_order_brief(o) for o in all_orders[:10]],
     }
 
@@ -294,4 +309,85 @@ def _order_dict(o: Order) -> dict:
             }
             for i in o.items
         ],
+    }
+
+
+# ── Gift Requests ─────────────────────────────────────────────
+
+def _gift_request_dict(r: GiftRequest) -> dict:
+    return {
+        "id": r.id,
+        "agent_code": r.agent_code,
+        "agent_name": r.agent.name if r.agent else None,
+        "customer_name": r.customer_name,
+        "customer_address": r.customer_address,
+        "eligible_amount": r.eligible_amount,
+        "gift_items": r.items_list(),
+        "gift_total": r.gift_total,
+        "status": r.status,
+        "notes": r.notes,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@router.post("/agents/{code}/gift-requests")
+def create_gift_request(code: str, body: dict, db: Session = Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.code == code).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    items = body.get("gift_items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="gift_items required")
+
+    gift_total = sum(int(i.get("unit_value", 0)) * int(i.get("quantity", 1)) for i in items)
+    eligible = int(body.get("eligible_amount", 0))
+    if gift_total > eligible:
+        raise HTTPException(status_code=400, detail="gift_total exceeds eligible_amount")
+
+    req = GiftRequest(
+        agent_code=code,
+        customer_name=(body.get("customer_name") or "").strip(),
+        customer_address=(body.get("customer_address") or "").strip(),
+        eligible_amount=eligible,
+        gift_items=json.dumps(items, ensure_ascii=False),
+        gift_total=gift_total,
+        notes=body.get("notes") or None,
+    )
+    if not req.customer_name or not req.customer_address:
+        raise HTTPException(status_code=400, detail="customer_name and customer_address required")
+
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return _gift_request_dict(req)
+
+
+@router.get("/agents/{code}/gift-requests")
+def list_agent_gift_requests(
+    code: str,
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    agent = db.query(Agent).filter(Agent.code == code).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    query = db.query(GiftRequest).filter(GiftRequest.agent_code == code)
+    if month:
+        year, mon = map(int, month.split("-"))
+        query = query.filter(
+            extract("year", GiftRequest.created_at) == year,
+            extract("month", GiftRequest.created_at) == mon,
+        )
+    requests = query.order_by(GiftRequest.created_at.desc()).all()
+
+    active = [r for r in requests if r.status != "已取消"]
+    gift_total_sum = sum(r.gift_total for r in active)
+
+    return {
+        "month": month,
+        "gift_total_sum": gift_total_sum,
+        "request_count": len(active),
+        "items": [_gift_request_dict(r) for r in requests],
     }

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Foreig
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database import Base
+import json
 
 TIERS = [
     {"tier": 1, "min_retail": 0,      "max_retail": 70000,  "discount": 0.80},
@@ -120,3 +121,26 @@ class Customer(Base):
     created_at = Column(DateTime, default=now_utc)
 
     agent = relationship("Agent")
+
+
+class GiftRequest(Base):
+    __tablename__ = "gift_requests"
+
+    id = Column(Integer, primary_key=True)
+    agent_code = Column(String, ForeignKey("agents.code"), nullable=False, index=True)
+    customer_name = Column(String, nullable=False)
+    customer_address = Column(Text, nullable=False)
+    eligible_amount = Column(Integer, nullable=False)  # 客人消費原價
+    gift_items = Column(Text, nullable=False)           # JSON list
+    gift_total = Column(Integer, nullable=False, default=0)
+    status = Column(String, default="待處理")           # 待處理 / 已完成 / 已取消
+    notes = Column(Text)
+    created_at = Column(DateTime, default=now_utc)
+
+    agent = relationship("Agent")
+
+    def items_list(self):
+        try:
+            return json.loads(self.gift_items)
+        except Exception:
+            return []

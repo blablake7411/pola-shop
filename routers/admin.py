@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import extract
 from database import get_db
-from models import (Agent, Order, OrderItem, Customer,
+from models import (Agent, Order, OrderItem, Customer, GiftRequest,
                     get_discount, get_store_discount, get_agent_discount,
                     YOUR_COST_RATE, TIERS, STORE_TIERS, DIRECT_DISCOUNT,
                     calc_tier_by_retail, calc_store_tier_by_retail, now_utc)
@@ -10,7 +10,7 @@ from datetime import datetime, timezone, date
 from typing import Optional
 import os
 
-from routers.public import _order_dict
+from routers.public import _order_dict, _gift_request_dict
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -47,8 +47,23 @@ def _agent_monthly_stats(agent_code: str, month: str, db: Session) -> dict:
     }
 
 
+def _agent_gift_stats(agent_code: str, month: str, db: Session) -> dict:
+    year, mon = map(int, month.split("-"))
+    reqs = db.query(GiftRequest).filter(
+        GiftRequest.agent_code == agent_code,
+        GiftRequest.status != "已取消",
+        extract("year", GiftRequest.created_at) == year,
+        extract("month", GiftRequest.created_at) == mon,
+    ).all()
+    return {
+        "gift_total_sum": sum(r.gift_total for r in reqs),
+        "gift_request_count": len(reqs),
+    }
+
+
 def _agent_dict(a: Agent, month: str, db: Session) -> dict:
     stats = _agent_monthly_stats(a.code, month, db)
+    gift_stats = _agent_gift_stats(a.code, month, db)
     return {
         "code": a.code,
         "name": a.name,
@@ -59,7 +74,7 @@ def _agent_dict(a: Agent, month: str, db: Session) -> dict:
         "manual_override": a.manual_override,
         "joined_at": a.joined_at,
         "created_at": a.created_at.isoformat() if a.created_at else None,
-        "monthly_stats": stats,
+        "monthly_stats": {**stats, **gift_stats},
     }
 
 
@@ -448,3 +463,55 @@ def delete_customer(
     db.delete(c)
     db.commit()
     return {"ok": True}
+
+
+# ── Gift Requests ─────────────────────────────────────────────
+
+@router.get("/gift-requests")
+def list_gift_requests(
+    month: Optional[str] = None,
+    agent_code: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    query = db.query(GiftRequest)
+    if month:
+        year, mon = map(int, month.split("-"))
+        query = query.filter(
+            extract("year", GiftRequest.created_at) == year,
+            extract("month", GiftRequest.created_at) == mon,
+        )
+    if agent_code:
+        query = query.filter(GiftRequest.agent_code == agent_code)
+    if status:
+        query = query.filter(GiftRequest.status == status)
+    requests = query.order_by(GiftRequest.created_at.desc()).all()
+
+    active = [r for r in requests if r.status != "已取消"]
+    return {
+        "gift_total_sum": sum(r.gift_total for r in active),
+        "request_count": len(active),
+        "items": [_gift_request_dict(r) for r in requests],
+    }
+
+
+@router.patch("/gift-requests/{request_id}")
+def update_gift_request(
+    request_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    req = db.query(GiftRequest).filter(GiftRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Gift request not found")
+    if "status" in body:
+        req.status = body["status"]
+    if "notes" in body:
+        req.notes = body["notes"] or None
+    db.commit()
+    db.refresh(req)
+    return _gift_request_dict(req)
