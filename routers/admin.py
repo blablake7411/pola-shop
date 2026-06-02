@@ -4,7 +4,7 @@ from sqlalchemy import extract
 from database import get_db
 from models import (Agent, Order, OrderItem, Customer,
                     get_discount, get_store_discount, get_agent_discount,
-                    YOUR_COST_RATE, TIERS, STORE_TIERS,
+                    YOUR_COST_RATE, TIERS, STORE_TIERS, DIRECT_DISCOUNT,
                     calc_tier_by_retail, calc_store_tier_by_retail, now_utc)
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -144,6 +144,66 @@ def update_order_customer(
     for field in ["customer_name", "customer_phone", "customer_address", "notes", "payment_method"]:
         if field in body:
             setattr(order, field, body[field] or None)
+    db.commit()
+    db.refresh(order)
+    return _order_dict(order)
+
+
+@router.patch("/orders/{order_number}")
+def update_order_full(
+    order_number: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    order = db.query(Order).filter(Order.order_number == order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    for field in ["customer_name", "customer_phone", "customer_address", "notes", "payment_method"]:
+        if field in body:
+            setattr(order, field, body[field] or None)
+
+    if "agent_code" in body:
+        agent_code = body["agent_code"] or None
+        order.agent_code = agent_code
+        if agent_code:
+            agent = db.query(Agent).filter(Agent.code == agent_code).first()
+            if agent:
+                order.agent_tier = agent.current_tier
+                order.agent_discount = get_agent_discount(agent)
+            else:
+                order.agent_tier = None
+                order.agent_discount = DIRECT_DISCOUNT
+        else:
+            order.agent_tier = None
+            order.agent_discount = DIRECT_DISCOUNT
+
+    if "items" in body:
+        for item in list(order.items):
+            db.delete(item)
+        db.flush()
+
+        items_data = body["items"]
+        for item_data in items_data:
+            db.add(OrderItem(
+                order_id=order.id,
+                product_code=item_data.get("product_code"),
+                product_name=item_data["product_name"],
+                product_series=item_data.get("product_series"),
+                variant_label=item_data.get("variant_label"),
+                unit_price=int(item_data["unit_price"]),
+                quantity=int(item_data.get("quantity", 1)),
+            ))
+        db.flush()
+        db.refresh(order)
+
+        retail_total = sum(i.unit_price * i.quantity for i in order.items)
+        order.retail_total = retail_total
+        discount = order.agent_discount or DIRECT_DISCOUNT
+        order.agent_cost_total = round(retail_total * discount)
+
     db.commit()
     db.refresh(order)
     return _order_dict(order)
