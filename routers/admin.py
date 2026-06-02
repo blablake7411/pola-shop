@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import extract
 from database import get_db
-from models import (Agent, Order, OrderItem, Customer, GiftRequest,
+from models import (Agent, Order, OrderItem, Customer, GiftRequest, Setting,
                     get_discount, get_store_discount, get_agent_discount,
                     YOUR_COST_RATE, TIERS, STORE_TIERS, DIRECT_DISCOUNT,
                     calc_tier_by_retail, calc_store_tier_by_retail, now_utc)
@@ -550,3 +550,25 @@ def update_gift_request(
     db.commit()
     db.refresh(req)
     return _gift_request_dict(req)
+
+
+# ── Settings ──────────────────────────────────────────────────
+
+@router.post("/settings/{key}")
+async def post_setting(
+    key: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    import json as _json
+    _auth(authorization)
+    body = await request.json()
+    value = _json.dumps(body, ensure_ascii=False)
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if s:
+        s.value = value
+    else:
+        db.add(Setting(key=key, value=value))
+    db.commit()
+    return {"ok": True}

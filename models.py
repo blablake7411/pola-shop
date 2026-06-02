@@ -128,6 +128,12 @@ class Customer(Base):
     agent = relationship("Agent")
 
 
+class Setting(Base):
+    __tablename__ = "settings"
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+
+
 class GiftRequest(Base):
     __tablename__ = "gift_requests"
 

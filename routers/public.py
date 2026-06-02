@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract
 from database import get_db
-from models import (Agent, Order, OrderItem, Customer, GiftRequest,
+from models import (Agent, Order, OrderItem, Customer, GiftRequest, Setting,
                     get_agent_discount, DIRECT_DISCOUNT, YOUR_COST_RATE,
                     calc_tier_by_retail, calc_store_tier_by_retail)
 from datetime import datetime, timezone, date
@@ -422,3 +422,13 @@ def list_agent_gift_requests(
         "request_count": len(active),
         "items": [_gift_request_dict(r) for r in requests],
     }
+
+
+# ── Settings (product catalog sync) ──────────────────────────
+
+@router.get("/settings/{key}")
+def get_setting(key: str, db: Session = Depends(get_db)):
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Not found")
+    return json.loads(s.value)
