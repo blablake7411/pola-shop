@@ -582,7 +582,8 @@ def sync_customers_from_orders(
     authorization: Optional[str] = Header(None),
 ):
     _auth(authorization)
-    orders = db.query(Order).filter(Order.customer_phone != None).all()
+    orders = db.query(Order).filter(Order.customer_phone != None).order_by(Order.created_at).all()
+    seen = set()
     created, updated = 0, 0
     for o in orders:
         if not o.customer_phone:
@@ -598,12 +599,17 @@ def sync_customers_from_orders(
                 changed = True
             if changed:
                 updated += 1
-        else:
-            db.add(Customer(
-                phone=o.customer_phone,
-                name=o.customer_name or o.customer_phone,
-                agent_code=o.agent_code,
-            ))
-            created += 1
+        elif o.customer_phone not in seen:
+            seen.add(o.customer_phone)
+            try:
+                db.add(Customer(
+                    phone=o.customer_phone,
+                    name=o.customer_name or o.customer_phone,
+                    agent_code=o.agent_code,
+                ))
+                db.flush()
+                created += 1
+            except Exception:
+                db.rollback()
     db.commit()
     return {"created": created, "updated": updated}
