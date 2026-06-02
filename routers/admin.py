@@ -245,6 +245,20 @@ def update_order_full(
     return _order_dict(order)
 
 
+@router.delete("/orders/{order_number}")
+def delete_order(
+    order_number: str,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    order = db.query(Order).filter(Order.order_number == order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    db.delete(order)
+    db.commit()
+    return {"ok": True}
+
 
 @router.get("/agents")
 def list_agents(
