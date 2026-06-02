@@ -32,7 +32,10 @@ def get_store_discount(tier: int) -> float:
 
 
 def get_agent_discount(agent) -> float:
-    if getattr(agent, "agent_type", "personal") == "store":
+    agent_type = getattr(agent, "agent_type", "personal")
+    if agent_type == "owner":
+        return 0.60
+    if agent_type == "store":
         return get_store_discount(agent.current_tier)
     return get_discount(agent.current_tier)
 
