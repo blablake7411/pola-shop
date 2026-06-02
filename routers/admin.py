@@ -225,6 +225,11 @@ def update_order_full(
         discount = order.agent_discount or DIRECT_DISCOUNT
         order.agent_cost_total = round(retail_total * discount)
 
+    if "discount_amount" in body:
+        order.discount_amount = max(0, int(body["discount_amount"] or 0))
+    if "shipping_fee" in body:
+        order.shipping_fee = max(0, int(body["shipping_fee"] or 0))
+
     db.commit()
     db.refresh(order)
     return _order_dict(order)

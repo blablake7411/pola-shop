@@ -90,6 +90,8 @@ class Order(Base):
     agent_discount = Column(Float)
     retail_total = Column(Integer, default=0)
     agent_cost_total = Column(Integer, default=0)
+    discount_amount = Column(Integer, default=0, nullable=True)
+    shipping_fee = Column(Integer, default=0, nullable=True)
     created_at = Column(DateTime, default=now_utc)
     confirmed_at = Column(DateTime)
     shipped_at = Column(DateTime)
