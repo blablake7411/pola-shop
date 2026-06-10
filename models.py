@@ -124,6 +124,9 @@ class Customer(Base):
     agent_code = Column(String, ForeignKey("agents.code"), nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=now_utc)
+    password_hash = Column(Text, nullable=True)
+    address = Column(Text, nullable=True)
+    token = Column(String(64), nullable=True, unique=True)
 
     agent = relationship("Agent")
 
