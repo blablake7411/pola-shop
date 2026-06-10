@@ -20,7 +20,7 @@ def _migrate():
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {defn}"))
                 conn.commit()
             except Exception:
-                pass
+                conn.rollback()
 
 _migrate()
 
