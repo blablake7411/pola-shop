@@ -423,11 +423,26 @@ def get_monthly_report(
 
 @router.get("/customers")
 def list_customers(
+    q: Optional[str] = None,
+    agent_code: Optional[str] = None,
+    has_account: Optional[str] = None,
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None),
 ):
     _auth(authorization)
-    customers = db.query(Customer).order_by(Customer.created_at).all()
+    query = db.query(Customer).order_by(Customer.created_at)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            Customer.name.ilike(like) | Customer.phone.ilike(like)
+        )
+    if agent_code:
+        query = query.filter(Customer.agent_code == agent_code)
+    if has_account == "1":
+        query = query.filter(Customer.password_hash != None)
+    elif has_account == "0":
+        query = query.filter(Customer.password_hash == None)
+    customers = query.all()
     return [
         {
             "id": c.id,
@@ -436,6 +451,8 @@ def list_customers(
             "agent_code": c.agent_code,
             "agent_name": c.agent.name if c.agent else None,
             "notes": c.notes,
+            "has_account": c.password_hash is not None,
+            "address": c.address,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in customers
