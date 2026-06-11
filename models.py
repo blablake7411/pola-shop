@@ -127,6 +127,7 @@ class Customer(Base):
     password_hash = Column(Text, nullable=True)
     address = Column(Text, nullable=True)
     token = Column(String(64), nullable=True, unique=True)
+    line_user_id = Column(String(64), nullable=True, unique=True)
 
     agent = relationship("Agent")
 

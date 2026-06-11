@@ -11,7 +11,7 @@ from typing import Optional
 import os
 
 from routers.public import _order_dict, _gift_request_dict
-from utils.line_notify import notify_admin
+from utils.line_notify import notify_admin, push_text
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -159,7 +159,9 @@ def update_order_status(
             items_summary += f" 等共 {len(order.items)} 項"
         agent_label = order.agent.name if order.agent else "直客"
         status_labels = {"已確認": "訂單已確認", "已出貨": "訂單已出貨", "待確認": "新訂單待確認"}
-        msg = (
+
+        # 通知管理員
+        admin_msg = (
             f"[{status_labels[new_status]}]\n"
             f"單號：{order.order_number}\n"
             f"客人：{order.customer_name}\n"
@@ -167,7 +169,29 @@ def update_order_status(
             f"商品：{items_summary}\n"
             f"原價：NTD {order.retail_total:,}"
         )
-        notify_admin(msg)
+        notify_admin(admin_msg)
+
+        # 通知客人本人（如果有綁定 LINE）
+        if new_status in ("已確認", "已出貨") and order.customer_phone:
+            customer = db.query(Customer).filter(Customer.phone == order.customer_phone).first()
+            if customer and customer.line_user_id:
+                customer_msgs = {
+                    "已確認": (
+                        f"您好 {order.customer_name}！\n"
+                        f"您的訂單已確認。\n"
+                        f"單號：{order.order_number}\n"
+                        f"商品：{items_summary}\n"
+                        f"顧問會盡快與您聯繫安排付款及出貨。"
+                    ),
+                    "已出貨": (
+                        f"您好 {order.customer_name}！\n"
+                        f"您的訂單已出貨！\n"
+                        f"單號：{order.order_number}\n"
+                        f"商品：{items_summary}\n"
+                        f"請注意查收，如有問題請聯繫您的顧問。"
+                    ),
+                }
+                push_text(customer.line_user_id, customer_msgs[new_status])
 
     return _order_dict(order)
 
@@ -474,6 +498,7 @@ def list_customers(
             "notes": c.notes,
             "has_account": c.password_hash is not None,
             "address": c.address,
+            "line_user_id": c.line_user_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in customers

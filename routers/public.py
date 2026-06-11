@@ -31,6 +31,7 @@ class OrderIn(BaseModel):
     customer_address: Optional[str] = None
     payment_method: Optional[str] = None
     notes: Optional[str] = None
+    line_user_id: Optional[str] = None
     items: List[OrderItemIn]
 
 
@@ -299,11 +300,14 @@ def create_order(data: OrderIn, db: Session = Depends(get_db)):
                 existing.name = data.customer_name
             if agent and not existing.agent_code:
                 existing.agent_code = agent.code
+            if data.line_user_id and not existing.line_user_id:
+                existing.line_user_id = data.line_user_id
         else:
             db.add(Customer(
                 phone=data.customer_phone,
                 name=data.customer_name or data.customer_phone,
                 agent_code=agent.code if agent else None,
+                line_user_id=data.line_user_id or None,
             ))
 
     db.commit()
