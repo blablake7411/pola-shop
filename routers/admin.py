@@ -11,6 +11,7 @@ from typing import Optional
 import os
 
 from routers.public import _order_dict, _gift_request_dict
+from utils.line_notify import notify_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -148,6 +149,26 @@ def update_order_status(
 
     db.commit()
     db.refresh(order)
+
+    if new_status in ("已確認", "已出貨", "待確認"):
+        items_summary = "、".join(
+            f"{i.product_name}" + (f"×{i.quantity}" if i.quantity > 1 else "")
+            for i in order.items[:4]
+        )
+        if len(order.items) > 4:
+            items_summary += f" 等共 {len(order.items)} 項"
+        agent_label = order.agent.name if order.agent else "直客"
+        status_labels = {"已確認": "訂單已確認", "已出貨": "訂單已出貨", "待確認": "新訂單待確認"}
+        msg = (
+            f"[{status_labels[new_status]}]\n"
+            f"單號：{order.order_number}\n"
+            f"客人：{order.customer_name}\n"
+            f"顧問：{agent_label}\n"
+            f"商品：{items_summary}\n"
+            f"原價：NTD {order.retail_total:,}"
+        )
+        notify_admin(msg)
+
     return _order_dict(order)
 
 
