@@ -85,6 +85,7 @@ class Order(Base):
     customer_address = Column(Text)
     payment_method = Column(String, nullable=True)
     notes = Column(Text)
+    internal_notes = Column(Text, nullable=True)
     status = Column(String, default="待確認")
     agent_tier = Column(Integer)
     agent_discount = Column(Float)
@@ -94,6 +95,7 @@ class Order(Base):
     shipping_fee = Column(Integer, default=0, nullable=True)
     created_at = Column(DateTime, default=now_utc)
     confirmed_at = Column(DateTime)
+    paid_at = Column(DateTime, nullable=True)
     shipped_at = Column(DateTime)
 
     agent = relationship("Agent", back_populates="orders", foreign_keys=[agent_code])
@@ -127,7 +129,6 @@ class Customer(Base):
     password_hash = Column(Text, nullable=True)
     address = Column(Text, nullable=True)
     token = Column(String(64), nullable=True, unique=True)
-    line_user_id = Column(String(64), nullable=True, unique=True)
 
     agent = relationship("Agent")
 

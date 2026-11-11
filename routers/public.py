@@ -31,7 +31,6 @@ class OrderIn(BaseModel):
     customer_address: Optional[str] = None
     payment_method: Optional[str] = None
     notes: Optional[str] = None
-    line_user_id: Optional[str] = None
     items: List[OrderItemIn]
 
 
@@ -70,6 +69,7 @@ def _agent_public_dict(agent: Agent) -> dict:
 
 
 # ── Customer lookup ───────────────────────────────────────────
+
 
 @router.get("/customers/lookup")
 def lookup_customer(phone: str, db: Session = Depends(get_db)):
@@ -300,14 +300,11 @@ def create_order(data: OrderIn, db: Session = Depends(get_db)):
                 existing.name = data.customer_name
             if agent and not existing.agent_code:
                 existing.agent_code = agent.code
-            if data.line_user_id and not existing.line_user_id:
-                existing.line_user_id = data.line_user_id
         else:
             db.add(Customer(
                 phone=data.customer_phone,
                 name=data.customer_name or data.customer_phone,
                 agent_code=agent.code if agent else None,
-                line_user_id=data.line_user_id or None,
             ))
 
     db.commit()
@@ -335,6 +332,7 @@ def _order_dict(o: Order) -> dict:
         "customer_address": o.customer_address,
         "payment_method": o.payment_method,
         "notes": o.notes,
+        "internal_notes": o.internal_notes or None,
         "status": o.status,
         "agent_tier": o.agent_tier,
         "agent_discount": o.agent_discount,
@@ -347,6 +345,7 @@ def _order_dict(o: Order) -> dict:
         "your_profit": o.agent_cost_total - your_cost,
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "confirmed_at": o.confirmed_at.isoformat() if o.confirmed_at else None,
+        "paid_at": o.paid_at.isoformat() if o.paid_at else None,
         "shipped_at": o.shipped_at.isoformat() if o.shipped_at else None,
         "items": [
             {

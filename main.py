@@ -13,7 +13,8 @@ def _migrate():
         ("customers", "password_hash",    "TEXT"),
         ("customers", "address",          "TEXT"),
         ("customers", "token",            "VARCHAR(64)"),
-        ("customers", "line_user_id",     "VARCHAR(64)"),
+        ("orders",    "internal_notes",   "TEXT"),
+        ("orders",    "paid_at",          "TIMESTAMP"),
     ]
     with engine.connect() as conn:
         for table, col, defn in migrations:

@@ -11,7 +11,6 @@ from typing import Optional
 import os
 
 from routers.public import _order_dict, _gift_request_dict
-from utils.line_notify import notify_admin, push_text
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -144,55 +143,30 @@ def update_order_status(
     order.status = new_status
     if new_status == "已確認" and not order.confirmed_at:
         order.confirmed_at = now
+    elif new_status == "已付款" and not order.paid_at:
+        order.paid_at = now
     elif new_status == "已出貨" and not order.shipped_at:
         order.shipped_at = now
 
     db.commit()
     db.refresh(order)
+    return _order_dict(order)
 
-    if new_status in ("已確認", "已出貨", "待確認"):
-        items_summary = "、".join(
-            f"{i.product_name}" + (f"×{i.quantity}" if i.quantity > 1 else "")
-            for i in order.items[:4]
-        )
-        if len(order.items) > 4:
-            items_summary += f" 等共 {len(order.items)} 項"
-        agent_label = order.agent.name if order.agent else "直客"
-        status_labels = {"已確認": "訂單已確認", "已出貨": "訂單已出貨", "待確認": "新訂單待確認"}
 
-        # 通知管理員
-        admin_msg = (
-            f"[{status_labels[new_status]}]\n"
-            f"單號：{order.order_number}\n"
-            f"客人：{order.customer_name}\n"
-            f"顧問：{agent_label}\n"
-            f"商品：{items_summary}\n"
-            f"原價：NTD {order.retail_total:,}"
-        )
-        notify_admin(admin_msg)
-
-        # 通知客人本人（如果有綁定 LINE）
-        if new_status in ("已確認", "已出貨") and order.customer_phone:
-            customer = db.query(Customer).filter(Customer.phone == order.customer_phone).first()
-            if customer and customer.line_user_id:
-                customer_msgs = {
-                    "已確認": (
-                        f"您好 {order.customer_name}！\n"
-                        f"您的訂單已確認。\n"
-                        f"單號：{order.order_number}\n"
-                        f"商品：{items_summary}\n"
-                        f"顧問會盡快與您聯繫安排付款及出貨。"
-                    ),
-                    "已出貨": (
-                        f"您好 {order.customer_name}！\n"
-                        f"您的訂單已出貨！\n"
-                        f"單號：{order.order_number}\n"
-                        f"商品：{items_summary}\n"
-                        f"請注意查收，如有問題請聯繫您的顧問。"
-                    ),
-                }
-                push_text(customer.line_user_id, customer_msgs[new_status])
-
+@router.patch("/orders/{order_number}/internal-notes")
+def update_internal_notes(
+    order_number: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    _auth(authorization)
+    order = db.query(Order).filter(Order.order_number == order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.internal_notes = body.get("internal_notes") or None
+    db.commit()
+    db.refresh(order)
     return _order_dict(order)
 
 
@@ -488,8 +462,24 @@ def list_customers(
     elif has_account == "0":
         query = query.filter(Customer.password_hash == None)
     customers = query.all()
-    return [
-        {
+    phones = [c.phone for c in customers if c.phone]
+    from sqlalchemy import func as sqlfunc
+    order_stats_rows = (
+        db.query(
+            Order.customer_phone,
+            sqlfunc.sum(Order.retail_total).label("total_retail"),
+            sqlfunc.count(Order.id).label("order_count"),
+            sqlfunc.max(Order.created_at).label("last_order_at"),
+        )
+        .filter(Order.customer_phone.in_(phones), Order.status != "已取消")
+        .group_by(Order.customer_phone)
+        .all()
+    )
+    stats_map = {r.customer_phone: r for r in order_stats_rows}
+    result = []
+    for c in customers:
+        s = stats_map.get(c.phone)
+        result.append({
             "id": c.id,
             "phone": c.phone,
             "name": c.name,
@@ -498,11 +488,12 @@ def list_customers(
             "notes": c.notes,
             "has_account": c.password_hash is not None,
             "address": c.address,
-            "line_user_id": c.line_user_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
-        }
-        for c in customers
-    ]
+            "total_retail": s.total_retail if s else 0,
+            "order_count": s.order_count if s else 0,
+            "last_order_at": s.last_order_at.isoformat() if s and s.last_order_at else None,
+        })
+    return result
 
 
 @router.post("/customers")
